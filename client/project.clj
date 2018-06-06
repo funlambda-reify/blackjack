@@ -16,7 +16,8 @@
 
   :profiles
   {:dev
-   {:dependencies [[binaryage/devtools "0.9.10"]]
+   {:dependencies [[binaryage/devtools "0.9.10"]
+                   [ring/ring-core "1.7.0-RC1"]]
 
     :plugins      [[lein-figwheel "0.5.16"]]}
    :prod { }}
