@@ -2,9 +2,19 @@
   (:require
    [re-frame.core :as re-frame]
    [blackjack.db :as db]
-   [blackjack.util :as util]))
+   [blackjack.util :as util]
+   [clojure.spec.alpha :as s]))
+
+(defn check-and-throw
+  "Throws an exception if `db` doesn't match the Spec `a-spec`."
+  [a-spec db]
+  (when-not (s/valid? a-spec db)
+    (throw (ex-info (str "spec check failed: " (s/explain-str a-spec db)) {}))))
+
+(def check-spec-interceptor (re-frame/after (partial check-and-throw :blackjack.db/db)))
 
 (defn require-status
+  "Throws an exception if `db` doesn't have status `expected-status`."
   [db expected-status]
   (if (not= (:status db) expected-status) 
     (throw (str "Expected status " expected-status 
@@ -12,10 +22,12 @@
 
 (re-frame/reg-event-db
  ::initialize-db
- (fn [_ _] db/initial-db))
+ [check-spec-interceptor]
+ (fn [_ _] db/default-db))
 
 (re-frame/reg-event-db 
   :start-new-round
+  [check-spec-interceptor]
   (fn [db [_]]
     (require-status db :round-over)
     (assoc db 
@@ -26,14 +38,16 @@
       :dealer-hand nil
       :dealer-poss-scores nil)))
 
-(re-frame/reg-event-db 
+(re-frame/reg-event-db
   :change-bet-text
+  [check-spec-interceptor]
   (fn [db [_ bet-text]]
     (require-status db :waiting-for-bet)
     (assoc db :bet-text bet-text)))
 
-(re-frame/reg-event-fx 
+(re-frame/reg-event-fx
   :make-bet
+  [check-spec-interceptor]
   (fn [{:keys [db]} [_]]
     (require-status db :waiting-for-bet)
     (if-let [ bet-amount (util/tryParseInt (:bet-text db)) ]
@@ -47,6 +61,7 @@
 
 (re-frame/reg-event-db 
   :deal-hands
+  [check-spec-interceptor]
   (fn [db [_]]
     (require-status db :ready-to-deal)
     (let [[player-hand deck] (util/deal-cards 2 (:deck db))
@@ -61,6 +76,7 @@
 
 (re-frame/reg-event-fx 
   :player-hit
+  [check-spec-interceptor]
   (fn [{:keys [db]} [_]]
     (require-status db :player-turn)
     (let [[ player-new-cards deck] (util/deal-cards 1 (:deck db))
@@ -72,12 +88,11 @@
               :round-result (if player-busted [ :player-lost :player-busted ] nil)
               :deck deck
               :player-hand player-hand
-              :player-poss-scores poss-hand-scores) 
-        ; :dispatch [ (if player-busted :settle-money nil) ] 
-      })))
+              :player-poss-scores poss-hand-scores) })))
 
 (re-frame/reg-event-fx 
   :player-stand
+  [check-spec-interceptor]
   (fn [{:keys [db]} [_]]
     (require-status db :player-turn)
     {:db (assoc db :status :dealer-turn)
@@ -85,6 +100,7 @@
 
 (re-frame/reg-event-fx
   :dealer-play
+  [check-spec-interceptor]
   (fn [{:keys [db]} [_]]
     (require-status db :dealer-turn)
       (loop [db db] ; Take cards until bust or (highest poss.) dealer score is >= 17
@@ -108,6 +124,7 @@
 
 (re-frame/reg-event-fx
   :compare-scores
+  [check-spec-interceptor]
   (fn [{:keys [db]} [_]]
     (require-status db :dealer-done)
     (let [player-score (last (:player-poss-scores db))
@@ -120,6 +137,7 @@
 
 (re-frame/reg-event-db
   :settle-money
+  [check-spec-interceptor]
   (fn [db [_]]
     (require-status db :winner-determined)
     (assoc db
