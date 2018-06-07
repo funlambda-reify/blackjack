@@ -69,15 +69,21 @@
 
 (defn main-panel []
   (let [state @(re-frame/subscribe [::subs/state])]
-    [:div
-     [:h1 "Blackjack"]
-     [:div (str "Your bankroll: $" (:player-money state))]
-     (if (not (#{:round-over :waiting-for-bet } (:status state))) (game-display state))
-     (case (:status state)
-        :waiting-for-bet make-bet-form
-        :ready-to-deal ready-to-deal-panel
-        :player-turn player-turn-panel
-        :dealer-turn dealer-turn-panel
-        :winner-determined (result-panel (:round-result state))
-        :round-over round-over-form)
-    ]))
+    (if (= (:status state) :initializing)
+      [:p "Initializing..."]
+      [:div
+        (case (:server-status state)
+          :connected "Connected"
+          :disconneted "Disconnected"
+          "")
+        [:h1 "Blackjack"]
+        [:div (str "Your bankroll: $" (:player-money state))]
+        (if (:server-msg state) [:div.msg (:server-msg state)])
+        (if (not (#{:round-over :waiting-for-bet } (:status state))) (game-display state))
+        (case (:status state)
+            :waiting-for-bet make-bet-form
+            :ready-to-deal ready-to-deal-panel
+            :player-turn player-turn-panel
+            :dealer-turn dealer-turn-panel
+            :winner-determined (result-panel (:round-result state))
+            :round-over round-over-form)])))

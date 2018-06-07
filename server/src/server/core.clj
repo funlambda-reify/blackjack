@@ -9,10 +9,12 @@
 (defn update-bankroll [new-value]
   (reset! bankroll new-value))
 
+
+  
 (def invalid-request
-  {:status 400 :headers {} :body "Invalid request"})
+  {:status 400 :headers {"Access-Control-Allow-Origin" "*"} :body "Invalid request"})
 (defn success [msg]
-  {:status 200 :headers {} :body msg})
+  {:status 200 :headers {"Access-Control-Allow-Origin" "*"} :body msg})
 
 (defn handler [request]
   (case (:request-method request)

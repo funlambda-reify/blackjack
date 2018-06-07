@@ -3,7 +3,8 @@
    [re-frame.core :as re-frame]
    [blackjack.db :as db]
    [blackjack.util :as util]
-   [clojure.spec.alpha :as s]))
+   [clojure.spec.alpha :as s]
+   [ajax.core :as ajax]))
 
 (defn check-and-throw
   "Throws an exception if `db` doesn't match the Spec `a-spec`."
@@ -20,10 +21,38 @@
     (throw (str "Expected status " expected-status 
             " but in status " (:status db)))))
 
-(re-frame/reg-event-db
+(re-frame/reg-event-fx
  ::initialize-db
  [check-spec-interceptor]
- (fn [_ _] db/default-db))
+ (fn [{:keys [db]} _] 
+  { :db db/default-db
+    :http-xhrio {:method          :get
+                 :uri             "http://localhost:3000/"
+                 :timeout         8000
+                 :response-format (ajax/json-response-format {:keywords? true})
+                 :on-success      [:load-bankroll-success]
+                 :on-failure      [:load-bankroll-failure]}}))
+
+(re-frame/reg-event-db
+ :load-bankroll-success
+ [check-spec-interceptor]
+ (fn [db [ _ bankroll ]]
+  (require-status db :initializing)
+  (assoc db
+    :server-status :connected
+    :status :waiting-for-bet
+    :player-money bankroll)))
+
+(re-frame/reg-event-db
+ :load-bankroll-failure
+ [check-spec-interceptor]
+ (fn [db]
+  (require-status db :initializing)
+  (assoc db
+    :status :waiting-for-bet
+    :server-msg [ :warning "Unable to connect to server. Your bankroll will not be saved!" ]
+    :server-status :disconnected
+    :player-money 1000)))
 
 (re-frame/reg-event-db 
   :start-new-round
@@ -135,15 +164,47 @@
                                   (< player-score dealer-score) [ :player-lost :higher-score ]
                                   :else [ :tied ]))})))
 
-(re-frame/reg-event-db
+(re-frame/reg-event-fx
   :settle-money
   [check-spec-interceptor]
-  (fn [db [_]]
+  (fn [{:keys [db]} [_]]
     (require-status db :winner-determined)
-    (assoc db
-      :status :round-over
-      :current-bet 0
-      :player-money (case (first (:round-result db))
-                        :player-won (+ (:player-money db) (* 2 (:current-bet db)))
-                        :tied (+ (:player-money db) (:current-bet db))
-                        :player-lost (:player-money db)))))
+    (let [player-money (case (first (:round-result db))
+                          :player-won (+ (:player-money db) (* 2 (:current-bet db)))
+                          :tied (+ (:player-money db) (:current-bet db))
+                          :player-lost (:player-money db))]
+      (println "NEW MONEY" player-money)
+      { :db (assoc db
+              :status :round-over
+              :current-bet 0
+              :player-money player-money)
+        :dispatch (if (= (:server-status db) :connected) [ :save-bankroll ] [])})))
+
+(re-frame/reg-event-fx
+ :save-bankroll
+ [check-spec-interceptor]
+ (fn [{:keys [db]} [_]]
+  (println "Saving bankroll...")
+  { :db db
+    :http-xhrio {:method          :post
+                 :uri             "http://localhost:3000/"
+                 :body            (str "bankroll=" (:player-money db))
+                 :timeout         8000
+                 :response-format (ajax/text-response-format)
+                 :on-success      [:save-bankroll-success]
+                 :on-failure      [:save-bankroll-failure]}}))
+
+(re-frame/reg-event-db
+ :save-bankroll-success
+ [check-spec-interceptor]
+ (fn [db] db))
+
+(re-frame/reg-event-db
+ :save-bankroll-failure
+ [check-spec-interceptor]
+ (fn [db]
+  (assoc db
+    :status :waiting-for-bet
+    :server-msg [ :error "Unable to save bankroll" ]
+    :server-status :disconnected
+    :player-money 1000)))
